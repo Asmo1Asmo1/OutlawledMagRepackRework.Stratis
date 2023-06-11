@@ -1,4 +1,4 @@
-/*Original is made by Outlawled, R3vo and GiPPO back in 2015-2017*/
+/*Original mod is made by Outlawled, R3vo, GiPPO and OOster*/
 /*https://steamcommunity.com/sharedfiles/filedetails/?id=1593431569*/
 /*Reworked by Asmo*/
 
@@ -17,7 +17,7 @@
 #define TIME_PER_BULLET 0.8
 #define TIME_PER_MG_BELT 6
 #define TIME_TEXT_UPDATE 0.25
-#define ADD_EMPTY_MAGS_BACK false
+#define ADD_EMPTIED_MAGS_BACK false
 
 /*Macro*/
 #define DIALOG_WINDOW (uiNamespace getVariable ["MRO_Dialog_Main",displayNull])
@@ -46,11 +46,10 @@
 #define TYPE 0
 #define CUR_AMMO 1
 #define MAX_AMMO 2
-#define LOCATION 3
-#define MAG_COUNT 4
-#define CALIBER 5
-#define IS_MG_BELT 6
-#define DISPLAY_NAME 7
+#define MAG_COUNT 3
+#define CALIBER 4
+#define IS_MG_BELT 5
+#define DISPLAY_NAME 6
 
 #define DRAG_NONE -1
 #define DRAG_SOURCE -2
@@ -192,6 +191,7 @@ MRO_CreateDialog =
 		MRO_isTextLocalized = true;
 	};
 
+	//Draw interface
 	[] spawn
 	{
 		private _mainWindow = displayNull;
@@ -362,7 +362,7 @@ MRO_UpdateMagsList =
 MRO_UpdateSourceAndTarget =
 {
 	private _updateScript = {
-		params ["_item","_box","_pic","_ammoSlider","_infoBlock","_area","_enableScript"];
+		params ["_item","_box","_pic","_ammoSlider","_infoBlock","_area"];
 
 		private _isEmpty = IS_EMPTY(_item);
 		lbClear (DIALOG_WINDOW displayCtrl _box);
@@ -494,12 +494,11 @@ MRO_OnSelectionChange =
 //======================================================================================================
 //======================================================================================================
 //Drag util
-MRO_emptyDragged = [/*TYPE*/"NaN",/*AMMO*/-1,-1,/*LOC&COUNT*/-1,-1,/*CALIBER,MG,NAME*/"NaN",false,"NaN"];
 MRO_PeekDraggedItem =
 {
 	private _draggedItem = switch (MRO_dragging) do
 	{
-		case DRAG_NONE: {MRO_emptyDragged};
+		case DRAG_NONE: {[]};
 		case DRAG_SOURCE: {MRO_source};
 		case DRAG_TARGET: {MRO_target};
 		default /*List item index*/ {MRO_currentMagsList select MRO_dragging};
@@ -518,6 +517,10 @@ MRO_BlockUiSelectively =
 	private _colorBlocked = [1,0,0,0.3];
 
 	private _draggedItem = call MRO_PeekDraggedItem;
+	if (IS_EMPTY(_draggedItem)) exitWith {
+		systemChat "MRO_BlockUiSelectively: dragging an empty item";
+	};
+
 	private _sourceDragging = _draggedItem isEqualTo MRO_source;
 	private _targetDragging = _draggedItem isEqualTo MRO_target;
 
@@ -625,7 +628,7 @@ MRO_MoveItem =
 		private _draggedItem = call MRO_PeekDraggedItem;
 
 		//Check valid
-		if (IS_EMPTY(_draggedItem) || {_draggedItem isEqualTo MRO_emptyDragged}) exitWith {
+		if (IS_EMPTY(_draggedItem)) exitWith {
 			systemChat "MRO_MoveItem: dragging an empty item";
 		};
 		if (MRO_dragging < 0) exitWith {
@@ -715,16 +718,16 @@ MRO_MoveItem =
 
 MRO_ExtractFromList =
 {
-	private _index = _this;
-	if (_index >= (count MRO_currentMagsList) || {_index < 0}) exitWith {
-		systemChat (format["MRO_ExtractFromList: incorrect index '%1'",_index]);
+	// private _index = _this;
+	if (_this >= (count MRO_currentMagsList) || {_this < 0}) exitWith {
+		systemChat (format["MRO_ExtractFromList: incorrect index '%1'",_this]);
 	};
 
 	//Check if last mag of its kind
-	if (((MRO_currentMagsList#_index)#MAG_COUNT) <= 1) exitWith {MRO_currentMagsList deleteAt _index};
-	
+	if (((MRO_currentMagsList#_this)#MAG_COUNT) <= 1) exitWith {MRO_currentMagsList deleteAt _this};
+
 	//Else - create copy and change mag counts
-	private _listRecord = MRO_currentMagsList#_index;
+	private _listRecord = MRO_currentMagsList#_this;
 	private _result = _listRecord + [];
 	_listRecord set [MAG_COUNT,((_listRecord#MAG_COUNT)-1)];
 	_result set [MAG_COUNT,1];
@@ -736,18 +739,10 @@ MRO_ExtractFromList =
 MRO_AddToList =
 {
 	// private _item = _this;
-
-	private _isInList = false;
-	//do
-	{
-		if ((_this#TYPE) isEqualTo (_x#TYPE) && {(_this#CUR_AMMO) == (_x#CUR_AMMO)}) exitWith {
-			_x set [MAG_COUNT,((_x#MAG_COUNT)+1)];
-			_isInList = true;
-		};
-	} forEach MRO_currentMagsList;
-
-	if (!_isInList) then
-	{
+	private _i = MRO_currentMagsList findIf {(_this#TYPE) isEqualTo (_x#TYPE) && {(_this#CUR_AMMO) == (_x#CUR_AMMO)}};
+	if (_i != -1) then {
+		(MRO_currentMagsList#_i) set [MAG_COUNT,(((MRO_currentMagsList#_i)#MAG_COUNT)+1)];
+	} else {
 		MRO_currentMagsList pushBack _this;
 		MRO_currentMagsList sort true;
 	};
@@ -852,9 +847,10 @@ MRO_RepackCore =
 		{
 			_nextTextUpdate = _curTime + TIME_TEXT_UPDATE;
 			(DIALOG_WINDOW displayCtrl REPACKING_TEXT) ctrlSetText (_textArray#_textIndex);
-			_textIndex = if (_textIndex >= (count _textArray)) then {0} else {_textIndex + 1};
+			_textIndex = _textIndex + 1;
+			if (_textIndex >= (count _textArray)) then {_textIndex = 0};
 		};
-		
+
 		//Run repack logic
 		if (_curTime >= _nextLogicIteration) exitWith
 		{
@@ -877,48 +873,65 @@ MRO_RepackCore =
 	if (isNull DIALOG_WINDOW) exitWith {};
 
 	//Apply repack
-	private _locations = if ((MRO_source#LOCATION) == (MRO_target#LOCATION))
-		then {[(MRO_source#LOCATION)]}
-		else {[(MRO_source#LOCATION),(MRO_target#LOCATION)]};
-	//do
+	private _sourceDone = false;
+	private _targetDone = false;
 	{
-		//Get container mags
-		private _container = switch (_x) do {
-			case 0: {uniformContainer player};
-			case 1: {vestContainer player};
-			case 2: {backpackContainer player};
-		};
+		//Check if this container has source or target
+		private _container = _x;
 		private _allOldMags = magazinesAmmoCargo _container;
-		clearMagazineCargoGlobal _container;
-
-		//Try modify source
-		private _i = _allOldMags findIf {(_x#TYPE) isEqualTo (MRO_source#TYPE) && {(_x#CUR_AMMO) == (_oldSource#CUR_AMMO)}};
-		if (_i != -1) then {
-			if ((MRO_source#CUR_AMMO) <= 0 && {!ADD_EMPTY_MAGS_BACK}) then {
-				_allOldMags deleteAt _i;
-			} else {
-				(_allOldMags#_i) set [CUR_AMMO,(MRO_source#CUR_AMMO)];
+		private _sourceIndex = switch (true) do {
+			case (_sourceDone): {-1};
+			default {
+				_allOldMags findIf {(_x#TYPE) isEqualTo (MRO_source#TYPE) && {(_x#CUR_AMMO) == (_oldSource#CUR_AMMO)}}
+			};
+		};
+		private _targetIndex = switch (true) do {
+			case (_targetDone): {-1};
+			case (_sourceIndex == -1): {
+				_allOldMags findIf {(_x#TYPE) isEqualTo (MRO_target#TYPE) && {(_x#CUR_AMMO) == (_oldTarget#CUR_AMMO)}}
+			};
+			default {
+				private _index = -1;
+				{
+					if ((_x#TYPE) isEqualTo (MRO_target#TYPE) && {(_x#CUR_AMMO) == (_oldTarget#CUR_AMMO) && {_forEachIndex != _sourceIndex}}) exitWith {
+						_index = _forEachIndex;
+					};
+				} forEach _allOldMags;
+				_index
 			};
 		};
 
-		//Try modify target
-		private _j = _allOldMags findIf {(_x#TYPE) isEqualTo (MRO_target#TYPE) && {(_x#CUR_AMMO) == (_oldTarget#CUR_AMMO)}};
-		if (_j != -1) then {
-			(_allOldMags#_j) set [CUR_AMMO,(MRO_target#CUR_AMMO)];
+		//Check if any
+		if (_sourceIndex == -1 && {_targetIndex == -1}) then {continue};
+
+		//Delete all mags
+		clearMagazineCargoGlobal _container;
+
+		//Try modify source
+		if (_sourceIndex != -1) then {
+			if ((MRO_source#CUR_AMMO) <= 0 && {!ADD_EMPTIED_MAGS_BACK}) then {
+				_allOldMags deleteAt _sourceIndex;
+			} else {
+				(_allOldMags#_sourceIndex) set [CUR_AMMO,(MRO_source#CUR_AMMO)];
+			};
+			_sourceDone = true;
 		};
 
-		//Repack mag array to add back format
-		//has different structure [_type,_magCount,_ammoCount]
+		//Try modify target
+		if (_targetIndex != -1) then {
+			(_allOldMags#_targetIndex) set [CUR_AMMO,(MRO_target#CUR_AMMO)];
+			_targetDone = true;
+		};
+
+		//Repack mag array to add back format (has different structure [_type,_magCount,_ammoCount])
 		private _allNewMags = [];
 		while { (count _allOldMags) > 0 } do
 		{
 			private _cur = _allOldMags deleteAt ((count _allOldMags) - 1);
-
-			//Check if such mag is already added
-			private _k = _allNewMags findIf {(_x#TYPE) isEqualTo (_cur#TYPE) && {(_x#2) == (_cur#CUR_AMMO)}};
-			if (_k != -1) then {
+			private _newMagIndex = _allNewMags findIf {(_x#TYPE) isEqualTo (_cur#TYPE) && {(_x#2) == (_cur#CUR_AMMO)}};
+			if (_newMagIndex != -1) then {
 				//Increase mag count
-				(_allNewMags#_k) set [1,(((_allNewMags#_k)#1)+1)];
+				(_allNewMags#_newMagIndex) set [1,(((_allNewMags#_newMagIndex)#1)+1)];
 			} else {
 				//Add new record
 				_allNewMags pushBack [(_cur#TYPE),1,(_cur#CUR_AMMO)];
@@ -927,8 +940,8 @@ MRO_RepackCore =
 
 		//Re-add mags
 		{_container addMagazineAmmoCargo _x} forEach _allNewMags;
-
-	} forEach _locations;
+		if (_sourceDone && _targetDone) exitWith {};
+	} forEach [(uniformContainer player),(vestContainer player),(backpackContainer player)];
 
 	//Cache
 	_oldSource = nil;
@@ -949,23 +962,19 @@ MRO_RepackCore =
 
 	//Try to re-add source and target by emulating user input
 	if ((_oldSource#CUR_AMMO) > 0) then {
-		//do
-		{
-			if ((_x#TYPE) isEqualTo (_oldSource#TYPE) && {(_x#CUR_AMMO) == (_oldSource#CUR_AMMO)}) exitWith {
-				MRO_dragging = _forEachIndex;
-				[MOVE_LIST,MOVE_SOURCE] call MRO_MoveItem;
-			};
-		} forEach MRO_currentMagsList;
+		private _m = MRO_currentMagsList findIf {(_x#TYPE) isEqualTo (_oldSource#TYPE) && {(_x#CUR_AMMO) == (_oldSource#CUR_AMMO)}};
+		if (_m != -1) then {
+			MRO_dragging = _m;
+			[MOVE_LIST,MOVE_SOURCE] call MRO_MoveItem;
+		};
 	};
 
 	if ((_oldTarget#CUR_AMMO) < (_oldTarget#MAX_AMMO)) then {
-		//do
-		{
-			if ((_x#TYPE) isEqualTo (_oldTarget#TYPE) && {(_x#CUR_AMMO) == (_oldTarget#CUR_AMMO)}) exitWith {
-				MRO_dragging = _forEachIndex;
-				[MOVE_LIST,MOVE_TARGET] call MRO_MoveItem;
-			};
-		} forEach MRO_currentMagsList;
+		private _n = MRO_currentMagsList findIf {(_x#TYPE) isEqualTo (_oldTarget#TYPE) && {(_x#CUR_AMMO) == (_oldTarget#CUR_AMMO)}};
+		if (_n != -1) then {
+			MRO_dragging = _n;
+			[MOVE_LIST,MOVE_TARGET] call MRO_MoveItem;
+		};
 	};
 };
 
@@ -988,10 +997,8 @@ MRO_GenerateMagsList =
 	//For every location
 	for "_i" from 0 to ((count _magsLocations)-1) do
 	{
-		private _curLocation = _i;
-		private _magsOfLocation = _magsLocations#_i;
-
 		//For every mag in this location
+		private _magsOfLocation = _magsLocations#_i;
 		for "_j" from 0 to ((count _magsOfLocation)-1) do
 		{
 			//Extract values
@@ -1004,19 +1011,19 @@ MRO_GenerateMagsList =
 			//If there is no such record yet, create new cache entry
 			if (isNil "_cachedInfo") then
 			{
+				//Get caliber and check if mag repack supported
 				private _caliber = _curType call MRO_GetCaliber;
 				if (_caliber isEqualTo "UNKNOWN") exitWith {
-					//That ammo is not supported
 					_cachedInfo = false;
 					MRO_magInfoCache set [_curType,false];
 				};
 
+				//Add new info record
 				private _maxAmmo = getNumber (configfile >> "CfgMagazines" >> _curType >> "count");
 				_cachedInfo = [
 					/*NaN*/nil,
 					/*NaN*/nil,
 					/*MAX_AMMO*/_maxAmmo,
-					/*NaN*/nil,
 					/*NaN*/nil,
 					/*CALIBER*/_caliber,
 					/*IS_MG_BELT*/(_maxAmmo > 100 || {(getText (configFile >> "CfgMagazines" >> _curType >> "nameSound")) isEqualTo "mGun"}),
@@ -1032,22 +1039,17 @@ MRO_GenerateMagsList =
 			if (!MRO_isShowFullMags && {_curAmmo >= (_cachedInfo#MAX_AMMO)}) then {continue};
 
 			//Check if already added (just need to increase mags count) (location we ignore on purpose - it doesn't matter for further logic)
-			private _isDouble = false;
-			//For every added mag in list
-			for "_k" from 0 to ((count _result)-1) do {
-				if (((_result#_k)#TYPE) isEqualTo _curType && {((_result#_k)#CUR_AMMO) == _curAmmo}) exitWith {
-					(_result#_k) set [MAG_COUNT,(((_result#_k)#MAG_COUNT) + 1)];
-					_isDouble = true;
-				};
+			private _k = _result findIf {(_x#TYPE) isEqualTo _curType && {(_x#CUR_AMMO) == _curAmmo}};
+			if (_k != -1) then {
+				(_result#_k) set [MAG_COUNT,(((_result#_k)#MAG_COUNT) + 1)];
+				continue;
 			};
-			if (_isDouble) then {continue};
 
 			//Add new result entry
 			_result pushBack [
 				/*TYPE*/_curType,
 				/*CUR_AMMO*/_curAmmo,
 				/*MAX_AMMO*/(_cachedInfo#MAX_AMMO),
-				/*LOCATION*/_curLocation,
 				/*MAG_COUNT*/1,
 				/*CALIBER*/(_cachedInfo#CALIBER),
 				/*IS_MG_BELT*/(_cachedInfo#IS_MG_BELT),
@@ -1140,12 +1142,7 @@ MRO_typeToCaliberMap = [
 MRO_GetCaliber =
 {
 	// private _magType = _this;
-	private _result = "UNKNOWN";
-	//do
-	{
-		if ((_x#0) in _this) exitWith {_result = _x#1};
-	} forEach MRO_typeToCaliberMap;
-
+	private _i = MRO_typeToCaliberMap findIf {(_x#0) in _this};
 	//return
-	_result
+	if (_i != -1) then {((MRO_typeToCaliberMap#_i)#1)} else {"UNKNOWN"}
 };
